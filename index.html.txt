@@ -1,0 +1,285 @@
+import React, { useEffect, useState, useRef } from "react";
+
+// Daily Aerospace Diary
+// Single-file React component (Tailwind-ready). Default export a component you can drop into a Vite/CRA app.
+
+export default function DailyAerospaceDiary() {
+  const [posts, setPosts] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("dad_posts_v1") || "[]");
+    } catch (e) {
+      return [];
+    }
+  });
+
+  const [view, setView] = useState("home"); // home | post:id | new
+  const [editingPost, setEditingPost] = useState(null);
+  const [query, setQuery] = useState("");
+  const [filterCat, setFilterCat] = useState("All");
+  const fileRef = useRef(null);
+
+  const CATEGORIES = ["All", "Rockets", "Propulsion", "Aerodynamics", "Spacecraft", "Planes", "Notes"];
+
+  useEffect(() => {
+    localStorage.setItem("dad_posts_v1", JSON.stringify(posts));
+  }, [posts]);
+
+  function createEmptyPost() {
+    return {
+      id: Date.now().toString(),
+      title: "",
+      content: "",
+      category: "Notes",
+      tags: [],
+      media: [], // {type: 'image'|'video', name, data}
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  function handleNew() {
+    const p = createEmptyPost();
+    setEditingPost(p);
+    setView("new");
+  }
+
+  function savePost(post) {
+    post.updatedAt = new Date().toISOString();
+    setPosts((prev) => {
+      const exists = prev.find((x) => x.id === post.id);
+      if (exists) return prev.map((x) => (x.id === post.id ? post : x));
+      return [post, ...prev];
+    });
+    setView(`post:${post.id}`);
+    setEditingPost(null);
+  }
+
+  function deletePost(id) {
+    if (!confirm("Delete this post permanently?")) return;
+    setPosts((prev) => prev.filter((p) => p.id !== id));
+    setView("home");
+  }
+
+  function attachFiles(files, post, callback) {
+    const list = Array.from(files);
+    let processed = 0;
+    list.forEach((f) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const isVideo = f.type.startsWith("video/");
+        const item = { type: isVideo ? "video" : "image", name: f.name, data: e.target.result };
+        post.media = [...(post.media || []), item];
+        processed++;
+        if (processed === list.length) callback(post);
+      };
+      reader.readAsDataURL(f);
+    });
+  }
+
+  function exportPosts() {
+    const blob = new Blob([JSON.stringify(posts, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "daily-aerospace-diary-posts.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importPosts(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target.result);
+        if (!Array.isArray(imported)) throw new Error("Invalid file");
+        // Merge by id, prefer imported newer ones
+        const map = new Map(posts.map((p) => [p.id, p]));
+        imported.forEach((p) => map.set(p.id, p));
+        setPosts(Array.from(map.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+        alert("Imported posts.");
+      } catch (err) {
+        alert("Failed to import: " + err.message);
+      }
+    };
+    r.readAsText(f);
+  }
+
+  function renderHome() {
+    const filtered = posts
+      .filter((p) => (filterCat === "All" ? true : p.category === filterCat))
+      .filter((p) => p.title.toLowerCase().includes(query.toLowerCase()) || p.content.toLowerCase().includes(query.toLowerCase()) || (p.tags || []).join(",").toLowerCase().includes(query.toLowerCase()));
+
+    return (
+      <div className="p-4 max-w-5xl mx-auto">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Daily Aerospace Diary</h1>
+          <div className="flex gap-2 items-center">
+            <button onClick={handleNew} className="px-3 py-1 rounded bg-sky-600 text-white">+ New</button>
+            <button onClick={exportPosts} className="px-3 py-1 rounded border">Export</button>
+            <label className="px-3 py-1 rounded border cursor-pointer">Import<input onChange={importPosts} type="file" accept="application/json" className="hidden" /></label>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-4 flex-col sm:flex-row">
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search posts or tags..." className="flex-1 px-3 py-2 border rounded" />
+          <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} className="px-3 py-2 border rounded">
+            {CATEGORIES.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {filtered.length === 0 && <div className="p-4 border rounded">No posts yet. Click <strong>+ New</strong> to create your first diary entry.</div>}
+          {filtered.map((p) => (
+            <article key={p.id} className="p-4 border rounded shadow-sm bg-white">
+              <div className="flex justify-between items-start">
+                <div>
+                  <h2 className="text-lg font-semibold cursor-pointer" onClick={() => setView(`post:${p.id}`)}>{p.title || "(Untitled)"}</h2>
+                  <div className="text-xs text-slate-500">{new Date(p.createdAt).toLocaleString()}</div>
+                </div>
+                <div className="text-sm text-slate-600">{p.category}</div>
+              </div>
+              <p className="mt-2 text-sm line-clamp-3" dangerouslySetInnerHTML={{ __html: p.content || "<em>No content</em>" }} />
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => { setEditingPost(p); setView('new'); }} className="text-sm px-2 py-1 border rounded">Edit</button>
+                <button onClick={() => deletePost(p.id)} className="text-sm px-2 py-1 border rounded">Delete</button>
+                <button onClick={() => setView(`post:${p.id}`)} className="text-sm px-2 py-1 border rounded">Open</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  function renderPost(id) {
+    const post = posts.find((p) => p.id === id);
+    if (!post) return <div className="p-4">Post not found.</div>;
+    return (
+      <div className="p-4 max-w-3xl mx-auto">
+        <div className="flex justify-between items-start mb-4">
+          <div>
+            <h1 className="text-2xl font-bold">{post.title || "(Untitled)"}</h1>
+            <div className="text-xs text-slate-500">{new Date(post.createdAt).toLocaleString()}</div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { setEditingPost(post); setView('new'); }} className="px-3 py-1 border rounded">Edit</button>
+            <button onClick={() => deletePost(post.id)} className="px-3 py-1 border rounded">Delete</button>
+            <button onClick={() => setView('home')} className="px-3 py-1 rounded bg-slate-100">Back</button>
+          </div>
+        </div>
+
+        <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: post.content }} />
+
+        {post.media && post.media.length > 0 && (
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {post.media.map((m, i) => (
+              <div key={i} className="border rounded p-1">
+                {m.type === 'image' ? <img src={m.data} alt={m.name} className="max-h-64 w-full object-contain" /> : <video controls src={m.data} className="w-full max-h-64" />}
+                <div className="text-xs mt-1">{m.name}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderEditor(post) {
+    const [local, setLocal] = useState(() => ({ ...post }));
+
+    useEffect(() => {
+      setLocal({ ...post });
+    }, [post]);
+
+    return (
+      <div className="p-4 max-w-3xl mx-auto">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xl font-semibold">{post.id && posts.find((p) => p.id === post.id) ? 'Edit Entry' : 'New Entry'}</h2>
+          <div className="flex gap-2">
+            <button onClick={() => { savePost(local); }} className="px-3 py-1 rounded bg-sky-600 text-white">Save</button>
+            <button onClick={() => { setEditingPost(null); setView('home'); }} className="px-3 py-1 border rounded">Cancel</button>
+          </div>
+        </div>
+
+        <input value={local.title} onChange={(e) => setLocal({ ...local, title: e.target.value })} placeholder="Title" className="w-full px-3 py-2 border rounded mb-2" />
+
+        <div className="flex gap-2 mb-2">
+          <select value={local.category} onChange={(e) => setLocal({ ...local, category: e.target.value })} className="px-3 py-2 border rounded">
+            {CATEGORIES.filter(c=>c!=='All').map((c)=> <option key={c} value={c}>{c}</option>)}
+          </select>
+          <input value={(local.tags || []).join(',')} onChange={(e)=>setLocal({...local, tags: e.target.value.split(',').map(t=>t.trim()).filter(Boolean)})} placeholder="tags (comma separated)" className="flex-1 px-3 py-2 border rounded" />
+        </div>
+
+        <div className="mb-2">
+          <div className="mb-1 text-sm text-slate-600">Write your entry (basic formatting allowed: bold, italic, links)</div>
+          <div contentEditable={true} className="min-h-[180px] border rounded p-3 prose" onInput={(e)=>setLocal({...local, content: e.currentTarget.innerHTML})} dangerouslySetInnerHTML={{ __html: local.content }} />
+        </div>
+
+        <div className="flex items-center gap-2 mt-3">
+          <input ref={fileRef} type="file" accept="image/*,video/*" multiple className="hidden" onChange={(e)=>{
+            const files = e.target.files;
+            if (!files || files.length===0) return;
+            attachFiles(files, local, (updated)=> setLocal({...updated}));
+          }} />
+          <button onClick={()=>fileRef.current?.click()} className="px-3 py-1 border rounded">Attach Image/Video</button>
+          <div className="text-sm text-slate-500">{(local.media||[]).length} media attached</div>
+        </div>
+
+        {(local.media||[]).length>0 && (
+          <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+            {local.media.map((m,i)=> (
+              <div key={i} className="border rounded p-1">
+                {m.type==='image' ? <img src={m.data} className="h-28 w-full object-cover" alt={m.name}/> : <video src={m.data} controls className="h-28 w-full object-cover"/>}
+                <div className="flex justify-between items-center text-xs mt-1">
+                  <span className="truncate">{m.name}</span>
+                  <button onClick={()=>{ setLocal({...local, media: local.media.filter((_,j)=>j!==i)}) }} className="px-1">Remove</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+      </div>
+    );
+  }
+
+  // Main render
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <header className="bg-gradient-to-r from-slate-900 to-sky-700 text-white p-4">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded bg-white/10 flex items-center justify-center font-bold">DA</div>
+            <div>
+              <div className="text-lg font-semibold">Daily Aerospace Diary</div>
+              <div className="text-xs text-white/80">A simple place to log your aerospace thoughts, photos & clips</div>
+            </div>
+          </div>
+          <nav className="flex gap-2">
+            <button onClick={()=>{ setView('home'); }} className="px-3 py-1">Home</button>
+            <button onClick={handleNew} className="px-3 py-1">New</button>
+            <button onClick={()=>{ setView('about'); }} className="px-3 py-1">About</button>
+          </nav>
+        </div>
+      </header>
+
+      <main className="py-6">
+        {view === 'home' && renderHome()}
+        {view.startsWith('post:') && renderPost(view.split(':')[1])}
+        {view === 'new' && editingPost && renderEditor(editingPost)}
+        {view === 'about' && (
+          <div className="p-4 max-w-3xl mx-auto">
+            <h2 className="text-xl font-semibold">About</h2>
+            <p className="mt-2">This is a lightweight diary for aerospace enthusiasts. Posts are stored in your browser (localStorage). To keep backups, use Export or Import features. You can host this app on GitHub Pages or Netlify for free.</p>
+          </div>
+        )}
+      </main>
+
+      <footer className="text-center text-sm text-slate-500 py-6">Made with curiosity — Daily Aerospace Diary</footer>
+    </div>
+  );
+}
